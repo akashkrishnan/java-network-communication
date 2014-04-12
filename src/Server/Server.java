@@ -15,8 +15,8 @@ import Packets.PacketManager;
 public final class Server {
     
     private final int port;
-    private ServerHandler serverHandler;
-    private PacketHandler packetHandler;
+    private final ServerHandler serverHandler;
+    private final PacketHandler packetHandler;
     
     public Server(int port, ServerHandler serverHandler, PacketHandler packetHandler) {
         this.port = port;
@@ -31,7 +31,7 @@ public final class Server {
             System.out.println("Listening on port " + port + ".");
             try (ServerSocket serverSock = new ServerSocket(port)) {
                 while (true) {
-                    new ServerCommunicationHandler(serverSock.accept()).start();
+                    new ClientServerCommunicationHandler(serverSock.accept()).start();
                 }
             } catch (IOException e) {
                 e.printStackTrace();
@@ -39,11 +39,11 @@ public final class Server {
         }
     }
     
-    private final class ServerCommunicationHandler extends Thread {
+    private final class ClientServerCommunicationHandler extends Thread {
         
         private final Socket socket;
         
-        public ServerCommunicationHandler(Socket socket) {
+        public ClientServerCommunicationHandler(Socket socket) {
             this.socket = socket;
         }
         
@@ -55,7 +55,7 @@ public final class Server {
             serverHandler.onConnection();
             try (DataInputStream in = new DataInputStream(socket.getInputStream());
                     DataOutputStream out = new DataOutputStream(socket.getOutputStream())) {
-                processClient(in, out);
+                processClient(in);
             } catch (IOException e) {
                 e.printStackTrace();
             } finally {
@@ -69,22 +69,24 @@ public final class Server {
             }
         }
         
-        private void processClient(DataInputStream in, DataOutputStream out) throws IOException {
-            final Packet p = PacketManager.get(in);
-            Method[] methods = packetHandler.getClass().getDeclaredMethods();
-            for (final Method method : methods) {
-                if (method.getName().equals("on" + p.getName())) {
-                    new Runnable() {
-                        @Override
-                        public void run() {
-                            try {
-                                method.invoke(p);
-                            } catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
-                                e.printStackTrace();
+        private void processClient(DataInputStream in) throws IOException {
+            while (true) {
+                final Packet p = PacketManager.get(in);
+                Method[] methods = packetHandler.getClass().getDeclaredMethods();
+                for (final Method method : methods) {
+                    if (method.getName().equals("on" + p.getName())) {
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                try {
+                                    method.invoke(p);
+                                } catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
+                                    e.printStackTrace();
+                                }
                             }
-                        }
-                    }.run();
-                    break;
+                        }.run();
+                        break;
+                    }
                 }
             }
         }

@@ -1,174 +1,77 @@
-/*
- * To change this template, choose Tools | Templates
- * and open the template in the editor.
- */
 package Client;
+
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.net.Socket;
 
 import Packets.Packet;
 import Packets.PacketHandler;
 import Packets.PacketManager;
-import Utilities.DataConversion;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.lang.reflect.Method;
-import java.net.Socket;
 
-/**
- *
- * @author akashkrishnan@aakay.net
- */
 public final class Client {
-
-    private String HOST;
-    private int PORT;
-    private Socket socket;
-    private InputStream in;
-    private OutputStream out;
-    private ClientHandler clientHandler;
-    private PacketHandler packetHandler;
-    private PacketManager packetManager;
-    private ServerListener serverListener;
-
-    public Client(String host, int port) {
-        this.HOST = host;
-        this.PORT = port;
-    }
-
-    public void setClientHandler(ClientHandler clientHandler) {
+    
+    private final String host;
+    private final int port;
+    private final ClientHandler clientHandler;
+    private final PacketHandler packetHandler;
+    
+    public Client(String host, int port, ClientHandler clientHandler, PacketHandler packetHandler) {
+        this.host = host;
+        this.port = port;
         this.clientHandler = clientHandler;
-    }
-
-    public void setPacketHandler(PacketHandler packetHandler) {
         this.packetHandler = packetHandler;
+        new ClientServerCommunicationHandler().start();
     }
-
-    public void setPacketManager(PacketManager packetManager) {
-        this.packetManager = packetManager;
-    }
-
-    public boolean start() {
-        if (this.serverListener == null
-                && this.clientHandler != null
-                && this.packetHandler != null
-                && this.packetManager != null) {
-            this.serverListener = new ServerListener();
-            ((Thread) this.serverListener).start();
-            return true;
-        }
-        return false;
-    }
-
-    public void sendPacket(Packet p) {
-        try {
-            this.out.write(p.getBytes());
-        } catch (Exception ex) {
-            System.out.println(ex);
-        }
-    }
-
-    private final class ServerListener extends Thread {
-
+    
+    private final class ClientServerCommunicationHandler extends Thread {
+        
+        private Socket socket;
+        
         @Override
         public void run() {
             while (true) {
+                System.out.println("Connecting to " + host + " on port " + port + ".");
                 try {
-                    System.out.println("Connecting to " + HOST + " on port " + PORT + ".");
-                    Client.this.socket = new Socket(HOST, PORT);
-                    Client.this.in = socket.getInputStream();
-                    Client.this.out = socket.getOutputStream();
+                    socket = new Socket(host, port);
+                    DataInputStream in = new DataInputStream(socket.getInputStream());
+                    DataOutputStream out = new DataOutputStream(socket.getOutputStream());
                     System.out.println("Connection to server has been established.");
+                    clientHandler.onConnection();
+                    processServer(in);
                 } catch (Exception ex) {
-                    System.out.println(ex);
+                    System.out.println("Connection to server has been lost.");
+                } finally {
+                    try {
+                        socket.close();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                    clientHandler.onDisconnection();
                 }
-                try {
-                    Client.this.clientHandler.handleConnection();
-                    byte[] headerBytes = new byte[Packet.HEADER_SIZE];
-                    byte[] sizeBytes = new byte[4];
-                    byte[] data = new byte[0];
-                    int header = 0;
-                    int size = 0;
-                    int bin;
-                    int i = 0;
-                    int j = 0;
-                    while (true) {
-                        if ((bin = Client.this.in.read()) != -1) {
-                            byte b = (byte) bin;
-                            if (i < headerBytes.length) {
-                                headerBytes[j] = b;
-                                header = DataConversion.toInt(headerBytes);
-                                i++;
-                                j++;
-                                if (j == headerBytes.length) {
-                                    j = 0;
-                                }
-                            } else if (i < headerBytes.length + sizeBytes.length) {
-                                sizeBytes[j] = b;
-                                size = DataConversion.toInt(sizeBytes);
-                                data = new byte[size];
-                                i++;
-                                j++;
-                                if (j == sizeBytes.length) {
-                                    j = 0;
-                                }
-                            } else if (i < headerBytes.length + sizeBytes.length + data.length) {
-                                data[j] = b;
-                                i++;
-                                j++;
-                                if (j == data.length) {
-                                    try {
-                                        boolean found = false;
-                                        Method[] methods = packetHandler.getClass().getDeclaredMethods();
-                                        for (final Method method : methods) {
-                                            if (method.getName().equals("handle" + packetManager.getPacketName(header))) {
-                                                final int _header = header;
-                                                final int _size = size;
-                                                final byte[] _data = data;
-                                                new Runnable() {
-
-                                                    @Override
-                                                    public void run() {
-                                                        try {
-                                                            method.invoke(packetHandler, packetManager.getPacketInstance(_header, _data));
-                                                        } catch (Exception ex) {
-                                                            System.out.println(ex);
-                                                            Client.this.clientHandler.handlePacket(_header, _size, _data);
-                                                        }
-                                                    }
-                                                }.run();
-                                                found = true;
-                                                break;
-                                            }
-                                        }
-                                        if (!found) {
-                                            Client.this.clientHandler.handlePacket(header, size, data);
-                                        }
-                                    } catch (Exception ex) {
-                                        System.out.println(ex);
-                                        Client.this.clientHandler.handlePacket(header, size, data);
-                                    }
-                                    i = 0;
-                                    j = 0;
+            }
+        }
+        
+        private void processServer(DataInputStream in) throws IOException {
+            while (true) {
+                final Packet p = PacketManager.get(in);
+                Method[] methods = packetHandler.getClass().getDeclaredMethods();
+                for (final Method method : methods) {
+                    if (method.getName().equals("on" + p.getName())) {
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                try {
+                                    method.invoke(p);
+                                } catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
+                                    e.printStackTrace();
                                 }
                             }
-                        } else {
-                            System.out.println("Connection terminated.");
-                            Client.this.clientHandler.handleDisconnection();
-                            break;
-                        }
+                        }.run();
+                        break;
                     }
-                } catch (Exception ex) {
-                    System.out.println(ex);
-                    System.out.println("Connection terminated.");
-                    Client.this.clientHandler.handleDisconnection();
-                }
-                System.out.println("Reconnecting in 5 seconds.");
-                try {
-                    Thread.sleep(5000);
-                } catch (Exception ex) {
-                    System.out.println(ex);
-                    System.out.println("Fatal error has occurred. Exiting.");
-                    System.exit(-1);
-                    break;
                 }
             }
         }
