@@ -1,202 +1,91 @@
-/*
- * To change this template, choose Tools | Templates
- * and open the template in the editor.
- */
 package Server;
 
-import Packets.Packet;
-import Packets.PacketHandler;
-import Packets.PacketManager;
-import Utilities.DataConversion;
-import java.io.InputStream;
-import java.io.OutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.ServerSocket;
 import java.net.Socket;
 
-/**
- *
- * @author akashkrishnan@aakay.net
- */
-public final class Server<CC extends ConnectionClient, CCL extends ConnectionClientList> {
+import Packets.Packet;
+import Packets.PacketHandler;
+import Packets.PacketManager;
 
-    private int PORT;
-    protected CCL ccl;
-    private Class<CC> ccc;
+public final class Server {
+    
+    private final int port;
     private ServerHandler serverHandler;
     private PacketHandler packetHandler;
-    private PacketManager packetManager;
-    private ConnectionListener connectionListener;
-
-    public Server(int port, Class<CC> ccc, Class<CCL> cclc) {
-        try {
-            PORT = port;
-            this.ccc = ccc;
-            ccl = (CCL) cclc.newInstance();
-        } catch (Exception ex) {
-            System.out.println(ex);
-        }
-    }
-
-    public void setServerHandler(ServerHandler serverHandler) {
+    
+    public Server(int port, ServerHandler serverHandler, PacketHandler packetHandler) {
+        this.port = port;
         this.serverHandler = serverHandler;
-    }
-
-    public void setPacketHandler(PacketHandler packetHandler) {
         this.packetHandler = packetHandler;
+        new ConnectionListener().start();
     }
-
-    public void setPacketManager(PacketManager packetManager) {
-        this.packetManager = packetManager;
-    }
-
-    public boolean start() {
-        if (this.connectionListener == null
-                && this.serverHandler != null
-                && this.packetHandler != null
-                && this.packetManager != null) {
-            this.connectionListener = new ConnectionListener();
-            ((Thread) this.connectionListener).start();
-            return true;
-        }
-        return false;
-    }
-
+    
     private final class ConnectionListener extends Thread {
-
         @Override
         public void run() {
-            try {
-                System.out.println("Listening on port " + PORT + ".");
-                ServerSocket serverSock = new ServerSocket(PORT);
+            System.out.println("Listening on port " + port + ".");
+            try (ServerSocket serverSock = new ServerSocket(port)) {
                 while (true) {
-                    ServerCommunicationHandler serverCommunicationHandler = new ServerCommunicationHandler(serverSock.accept());
-                    ((Thread) serverCommunicationHandler).start();
+                    new ServerCommunicationHandler(serverSock.accept()).start();
                 }
-            } catch (Exception ex) {
-                System.out.println(ex);
+            } catch (IOException e) {
+                e.printStackTrace();
             }
         }
     }
-
+    
     private final class ServerCommunicationHandler extends Thread {
-
-        private Socket socket;
-        private CC cc;
-        private InputStream in;
-        private OutputStream out;
-
+        
+        private final Socket socket;
+        
         public ServerCommunicationHandler(Socket socket) {
             this.socket = socket;
         }
-
+        
         @Override
         public void run() {
-            try {
-                String address = this.socket.getInetAddress().getHostAddress();
-                int port = this.socket.getPort();
-
-                this.in = this.socket.getInputStream();
-                this.out = this.socket.getOutputStream();
-
-                this.cc = (CC) Server.this.ccc.newInstance();
-                this.cc.setAddress(address);
-                this.cc.setPort(port);
-                this.cc.setOutputStream(this.out);
-
-                Server.this.ccl.add(this.cc);
-                System.out.println("Client connection from (" + address + ":" + port + ")");
-                processClient();
-                System.out.println("Client terminated from (" + address + ":" + port + ")");
-                Server.this.ccl.remove(address, port);
-
-                this.out.close();
-                this.in.close();
-                this.socket.close();
-            } catch (Exception ex) {
-                System.out.println(ex);
+            String address = socket.getInetAddress().getHostAddress();
+            int port = socket.getPort();
+            System.out.println("Client connection from (" + address + ":" + port + ").");
+            serverHandler.onConnection();
+            try (DataInputStream in = new DataInputStream(socket.getInputStream());
+                    DataOutputStream out = new DataOutputStream(socket.getOutputStream())) {
+                processClient(in, out);
+            } catch (IOException e) {
+                e.printStackTrace();
+            } finally {
+                try {
+                    socket.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+                System.out.println("Client terminated from (" + address + ":" + port + ").");
+                serverHandler.onDisconnection();
             }
         }
-
-        private void processClient() {
-            try {
-                Server.this.serverHandler.handleConnection(cc);
-                byte[] headerBytes = new byte[Packet.HEADER_SIZE];
-                byte[] sizeBytes = new byte[4];
-                byte[] data = new byte[0];
-                int header = 0;
-                int size = 0;
-                int bin;
-                int i = 0;
-                int j = 0;
-                while (true) {
-                    if ((bin = this.in.read()) != -1) {
-                        byte b = (byte) bin;
-                        if (i < headerBytes.length) {
-                            headerBytes[j] = b;
-                            header = DataConversion.toInt(headerBytes);
-                            i++;
-                            j++;
-                            if (j == headerBytes.length) {
-                                j = 0;
-                            }
-                        } else if (i < headerBytes.length + sizeBytes.length) {
-                            sizeBytes[j] = b;
-                            size = DataConversion.toInt(sizeBytes);
-                            data = new byte[size];
-                            i++;
-                            j++;
-                            if (j == sizeBytes.length) {
-                                j = 0;
-                            }
-                        } else if (i < headerBytes.length + sizeBytes.length + data.length) {
-                            data[j] = b;
-                            i++;
-                            j++;
-                            if (j == data.length) {
-                                try {
-                                    boolean found = false;
-                                    Method[] methods = packetHandler.getClass().getDeclaredMethods();
-                                    for (final Method method : methods) {
-                                        if (method.getName().equals("handle" + packetManager.getPacketName(header))) {
-                                            final int _header = header;
-                                            final int _size = size;
-                                            final byte[] _data = data;
-                                            new Runnable() {
-
-                                                @Override
-                                                public void run() {
-                                                    try {
-                                                        method.invoke(packetHandler, packetManager.getPacketInstance(_header, _data), cc);
-                                                    } catch (Exception ex) {
-                                                        System.out.println(ex);
-                                                        Server.this.serverHandler.handlePacket(_header, _size, _data, cc);
-                                                    }
-                                                }
-                                            }.run();
-                                            found = true;
-                                            break;
-                                        }
-                                    }
-                                    if (!found) {
-                                        Server.this.serverHandler.handlePacket(header, size, data, cc);
-                                    }
-                                } catch (Exception ex) {
-                                    System.out.println(ex);
-                                    Server.this.serverHandler.handlePacket(header, size, data, cc);
-                                }
-                                i = 0;
-                                j = 0;
+        
+        private void processClient(DataInputStream in, DataOutputStream out) throws IOException {
+            final Packet p = PacketManager.get(in);
+            Method[] methods = packetHandler.getClass().getDeclaredMethods();
+            for (final Method method : methods) {
+                if (method.getName().equals("on" + p.getName())) {
+                    new Runnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                method.invoke(p);
+                            } catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
+                                e.printStackTrace();
                             }
                         }
-                    } else {
-                        Server.this.serverHandler.handleDisconnection(cc);
-                        break;
-                    }
+                    }.run();
+                    break;
                 }
-            } catch (Exception ex) {
-                System.out.println(ex);
-                Server.this.serverHandler.handleDisconnection(cc);
             }
         }
     }
