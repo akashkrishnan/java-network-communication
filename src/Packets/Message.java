@@ -1,33 +1,27 @@
-/*
- * To change this template, choose Tools | Templates
- * and open the template in the editor.
- */
 package Packets;
 
-/**
- *
- * @author akashkrishnan@aakay.net
- */
 public class Message extends Packet {
-
-    public Message(byte[] data, PacketManager packetManager) {
-        super(data, packetManager);
+    
+    /**
+     * Makes new Message packet with message field of type string
+     */
+    public Message() {
+        addField("message", "");
     }
-
-    public Message(PacketManager packetManager) {
-        super(packetManager);
-    }
-
-    @Override
-    protected void initDataFields() {
-        this.addDataField("message", new DataField<String>(""));
-    }
-
+    
+    /**
+     * Gets the message field string
+     * @return message string
+     */
     public String getMessage() {
-        return ((DataField<String>) this.getDataField("message")).getValue();
+        return getField("message");
     }
-
+    
+    /**
+     * Sets the message field string and returns itself
+     * @param m message string
+     */
     public void setMessage(String m) {
-        ((DataField<String>) this.getDataField("message")).setValue(m);
+        setField("message", m);
     }
 }
