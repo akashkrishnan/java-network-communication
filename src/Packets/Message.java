@@ -24,4 +24,5 @@ public class Message extends Packet {
     public void setMessage(String m) {
         setField("message", m);
     }
+    
 }
