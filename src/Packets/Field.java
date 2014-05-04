@@ -10,6 +10,9 @@ import java.lang.reflect.Array;
 
 public final class Field<T> {
     
+    /**
+     * Value of field
+     *?
     private T v;
     
     /**
@@ -27,7 +30,6 @@ public final class Field<T> {
      */
     @SuppressWarnings("unchecked")
     public void read(DataInputStream in) throws IOException {
-        // TODO: implement the primitives and their arrays
         if (v instanceof Boolean) {
             v = (T) (Boolean) in.readBoolean();
         } else if (v instanceof Boolean[]) {
@@ -257,4 +259,5 @@ public final class Field<T> {
         }
         return v.toString();
     }
+    
 }
