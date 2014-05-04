@@ -10,6 +10,9 @@ import java.util.TreeMap;
  */
 public abstract class Packet {
     
+    /**
+     * Fields in packet
+     */
     private final TreeMap<String, Field<?>> fields = new TreeMap<String, Field<?>>();
     
     /**
@@ -100,4 +103,5 @@ public abstract class Packet {
     public final void println() {
         System.out.println(this);
     }
+    
 }
